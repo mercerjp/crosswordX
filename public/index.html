@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crossword Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f4f4f4;
+        }
+        #login, #crossword-form, #crossword, #loading {
+            margin-top: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(15, 30px);
+            grid-gap: 1px;
+            background-color: #333;
+        }
+        .cell {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            font-size: 18px;
+            font-weight: bold;
+            position: relative;
+        }
+        .cell.empty {
+            background-color: #eee;
+        }
+        .cell-number {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 10px;
+        }
+        .clues {
+            margin-top: 20px;
+        }
+        #loading-spinner {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #333;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="login">
+        <h2>Login</h2>
+        <input id="username" type="text" placeholder="Username" />
+        <input id="password" type="password" placeholder="Password" />
+        <button onclick="login()">Login</button>
+        <p id="login-error" style="color: red;"></p>
+    </div>
+
+    <div id="crossword-form" class="hidden">
+        <h2>Generate Crossword</h2>
+        <input id="prompt" type="text" placeholder="Enter a theme (e.g., bees)" />
+        <input id="size" type="number" placeholder="Grid size (default: 15)" />
+        <button onclick="generateCrossword()">Generate</button>
+    </div>
+
+    <div id="loading" class="hidden">
+        <div id="loading-spinner"></div>
+    </div>
+
+    <div id="crossword" class="hidden">
+        <h2>Crossword Puzzle</h2>
+        <div id="grid" class="grid"></div>
+        <div class="clues">
+            <h3>Clues</h3>
+            <div id="across-clues">
+                <strong>Across:</strong>
+                <ul></ul>
+            </div>
+            <div id="down-clues">
+                <strong>Down:</strong>
+                <ul></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = null;
+
+        async function login() {
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            try {
+                const response = await fetch("/api/v1/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.token;
+                    document.getElementById("login").classList.add("hidden");
+                    document.getElementById("crossword-form").classList.remove("hidden");
+                } else {
+                    document.getElementById("login-error").textContent = data.error;
+                }
+            } catch (error) {
+                document.getElementById("login-error").textContent = "Login failed.";
+            }
+        }
+
+        async function generateCrossword() {
+            const prompt = document.getElementById("prompt").value;
+            const size = document.getElementById("size").value || 15;
+
+            document.getElementById("crossword-form").classList.add("hidden");
+            document.getElementById("loading").classList.remove("hidden");
+
+            try {
+                const response = await fetch("/api/v1/prompt", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": token,
+                    },
+                    body: JSON.stringify({ phrase: prompt, size: size }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const words = parseCSV(data.csv);
+                    const grid = generateGrid(words, size);
+                    renderGrid(grid, words);
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                alert("Error generating crossword.");
+            } finally {
+                document.getElementById("loading").classList.add("hidden");
+            }
+        }
+
+        function parseCSV(csv) {
+            return csv
+                .split("\n")
+                .slice(1)
+                .map((row) => {
+                    const [position, answer, clue] = row.split(", ");
+                    return { position, answer, clue };
+                });
+        }
+
+        function generateGrid(words, gridSize) {
+            // Initialize an empty grid with the given gridSize
+            const grid = Array.from({ length: gridSize }, () => Array(gridSize).fill(""));
+
+            // Function to place the first word in the center of the grid
+            function placeFirstWord(word) {
+                const startRow = Math.floor(gridSize / 2);
+                const startCol = Math.floor((gridSize - word.length) / 2);
+                for (let i = 0; i < word.length; i++) {
+                    grid[startRow][startCol + i] = word[i];
+                }
+                return { row: startRow, col: startCol, direction: "A" };
+            }
+
+            // Function to check if a word can fit at a position
+            function canPlaceWord(word, startRow, startCol, direction) {
+                for (let i = 0; i < word.length; i++) {
+                    const r = direction === "A" ? startRow : startRow + i;
+                    const c = direction === "A" ? startCol + i : startCol;
+
+                    // Check grid bounds
+                    if (r >= gridSize || c >= gridSize || r < 0 || c < 0) {
+                        return false;
+                    }
+
+                    // Check if cell is empty or matches the letter
+                    if (grid[r][c] !== "" && grid[r][c] !== word[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            // Function to place a word in the grid
+            function placeWord(word, startRow, startCol, direction) {
+                for (let i = 0; i < word.length; i++) {
+                    const r = direction === "A" ? startRow : startRow + i;
+                    const c = direction === "A" ? startCol + i : startCol;
+                    grid[r][c] = word[i];
+                }
+            }
+
+            // Place the first word in the center
+            const firstWord = words[0].answer.toUpperCase();
+            placeFirstWord(firstWord);
+
+            // Place the remaining words
+            for (let i = 1; i < words.length; i++) {
+                const word = words[i].answer.toUpperCase();
+                let placed = false;
+
+                // Try to fit the word on existing letters in the grid
+                for (let row = 0; row < gridSize; row++) {
+                    for (let col = 0; col < gridSize; col++) {
+                        if (grid[row][col] === "") continue;
+
+                        // Check if the current grid letter matches any letter in the word
+                        const indexInWord = word.indexOf(grid[row][col]);
+                        if (indexInWord === -1) continue;
+
+                        // Calculate potential start positions for Across and Down
+                        const startRowA = row;
+                        const startColA = col - indexInWord;
+                        const startRowD = row - indexInWord;
+                        const startColD = col;
+
+                        // Try placing Across
+                        if (canPlaceWord(word, startRowA, startColA, "A")) {
+                            placeWord(word, startRowA, startColA, "A");
+                            placed = true;
+                            break;
+                        }
+
+                        // Try placing Down
+                        if (canPlaceWord(word, startRowD, startColD, "D")) {
+                            placeWord(word, startRowD, startColD, "D");
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) break;
+                }
+
+                // If no placement found, skip the word (optional: handle this case)
+                if (!placed) {
+                    console.warn(`Could not place the word: ${word}`);
+                }
+            }
+
+            return grid;
+        }
+
+
+        function renderGrid(grid, words) {
+            const gridElement = document.getElementById("grid");
+            gridElement.innerHTML = "";
+
+            let acrossClues = [];
+            let downClues = [];
+
+            words.forEach(({ position, answer, clue }) => {
+                if (position.endsWith("A")) {
+                    acrossClues.push(`${position}: ${clue}`);
+                } else if (position.endsWith("D")) {
+                    downClues.push(`${position}: ${clue}`);
+                }
+            });
+
+            grid.forEach((row, rowIndex) => {
+                row.forEach((cell, colIndex) => {
+                    const cellDiv = document.createElement("div");
+                    cellDiv.className = `cell${cell === "" ? " empty" : ""}`;
+                    if (cell !== "" && typeof cell === "object" && cell.letter) {
+                        cellDiv.textContent = cell.letter;
+                        const numberDiv = document.createElement("div");
+                        numberDiv.className = "cell-number";
+                        numberDiv.textContent = cell.number;
+                        cellDiv.appendChild(numberDiv);
+                    } else if (typeof cell === "string") {
+                        cellDiv.textContent = cell;
+                    }
+                    gridElement.appendChild(cellDiv);
+                });
+            });
+
+            // Display the clues
+            document.getElementById("across-clues").querySelector("ul").innerHTML = acrossClues.map(clue => `<li>${clue}</li>`).join("");
+            document.getElementById("down-clues").querySelector("ul").innerHTML = downClues.map(clue => `<li>${clue}</li>`).join("");
+
+            document.getElementById("loading").classList.add("hidden");
+            document.getElementById("crossword").classList.remove("hidden");
+        }
+    </script>
+</body>
+</html>

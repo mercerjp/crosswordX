@@ -4,15 +4,14 @@ const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-
 const db = require('./database');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const SECRET_KEY = process.env.JWT_SECRET_KEY;
 
 app.use(express.json()); // Middleware to parse JSON
+app.use(express.static('public')); // Front-end app (lightweight)
 
 // POST endpoint for user registration
 app.post('/api/v1/register', async (req, res) => {
